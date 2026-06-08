@@ -22,6 +22,30 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "../app.plugin.js",
+        {
+          "intents": [
+            {
+              "name": "getGreeting",
+              "title": "Get Greeting",
+              "description": "Returns a greeting for the saved user.",
+              "phrases": ["Get greeting from ${applicationName}"]
+            },
+            {
+              "name": "echo",
+              "title": "Echo Message",
+              "description": "Repeats the message you pass in, optionally shouting.",
+              "parameters": [
+                { "name": "message", "type": "string", "title": "Message" },
+                { "name": "loud", "type": "boolean", "title": "Shout" }
+              ]
+            }
+          ]
+        }
+      ]
+    ]
   }
 }

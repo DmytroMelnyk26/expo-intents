@@ -2,3 +2,6 @@
 // and on native platforms to ExpoIntentsModule.ts
 export { default } from './ExpoIntentsModule';
 export * from './ExpoIntents.types';
+export { setSharedData, getSharedData, removeSharedData } from './SharedData';
+export { registerIntentHandler } from './Intents';
+export type { IntentHandler, IntentHandlerContext } from './Intents';

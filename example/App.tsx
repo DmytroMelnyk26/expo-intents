@@ -1,10 +1,66 @@
+import {
+  getSharedData,
+  registerIntentHandler,
+  removeSharedData,
+  setSharedData,
+} from 'expo-intents';
+import { useEffect, useState } from 'react';
 import { Button, SafeAreaView, ScrollView, Text, View } from 'react-native';
 
+const KEY = 'phase2-roundtrip';
+
 export default function App() {
+  const [result, setResult] = useState<string>('(not run yet)');
+
+  // Phase 3: register the handler for the `getGreeting` App Intent (declared in app.json) and
+  // seed the shared data it reads. Done once on launch; both persist to the App Group store, so
+  // the shortcut works later even with the app closed.
+  useEffect(() => {
+    setSharedData('user', 'Username');
+    registerIntentHandler('getGreeting', async (_params, context) => {
+      'intent';
+      const user = getSharedData<string>('user') ?? 'world';
+      console.log('getGreeting handler ran for', context.intentName);
+      return `Hello, ${user}!`;
+    });
+
+    registerIntentHandler<{ message: string; loud: boolean }>('echo', async (params) => {
+      'intent';
+      const text = `You said:!! ${params.message}`;
+      return params.loud ? text.toUpperCase() : text;
+    });
+  }, []);
+
+  const runRoundTrip = () => {
+    const payload = { message: 'hello from JS', at: new Date().toISOString() };
+    setSharedData(KEY, payload);
+    const readBack = getSharedData<typeof payload>(KEY);
+    setResult(JSON.stringify(readBack, null, 2));
+  };
+
+  const clear = () => {
+    removeSharedData(KEY);
+    setResult(JSON.stringify(getSharedData(KEY)));
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.container}>
         <Text style={styles.header}>Module API Example</Text>
+        <Group name="Phase 2 — Shared data round trip">
+          <Button title="Set + get shared data" onPress={runRoundTrip} />
+          <Button title="Remove shared data" onPress={clear} />
+          <Text style={styles.result}>{result}</Text>
+        </Group>
+        <Group name="App Intents (trigger from Shortcuts / Siri)">
+          <Text style={styles.body}>
+            getGreeting — Siri: Get greeting from expo-intents-example. Returns Hello, Username!
+          </Text>
+          <Text style={styles.body}>
+            echo — has Message (text) and Shout (bool) parameters. Returns You said: ... (upper-cased
+            when Shout is on).
+          </Text>
+        </Group>
       </ScrollView>
     </SafeAreaView>
   );
@@ -24,5 +80,7 @@ const styles = {
   groupHeader: { fontSize: 20, marginBottom: 20 },
   group: { margin: 20, backgroundColor: '#fff', borderRadius: 10, padding: 20 },
   container: { flex: 1, backgroundColor: '#eee' },
+  body: { fontSize: 15, lineHeight: 22 },
+  result: { marginTop: 16, fontFamily: 'Courier', fontSize: 14 },
   view: { flex: 1, height: 200 },
 };
