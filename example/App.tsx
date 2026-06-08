@@ -26,7 +26,7 @@ export default function App() {
 
     registerIntentHandler<{ message: string; loud: boolean }>('echo', async (params) => {
       'intent';
-      const text = `You said:!! ${params.message}`;
+      const text = `You said: ${params.message}`;
       return params.loud ? text.toUpperCase() : text;
     });
   }, []);

@@ -18,7 +18,10 @@ public final class ExpoIntentsRunner {
   private let queue = DispatchQueue(label: "expo.intents.runner")
   private var context: JSContext?
   private var bundleScript: String?
-  private var handlerCache: [String: JSValue] = [:]
+  // Cached per handler name, tagged with the source it was evaluated from. When the stored source
+  // changes (e.g. Fast Refresh re-registers an edited handler), we re-evaluate instead of serving
+  // the stale value — so editing handler JS takes effect on the next trigger without a rebuild.
+  private var handlerCache: [String: (source: String, value: JSValue)] = [:]
 
   private init() {}
 
@@ -216,8 +219,8 @@ public final class ExpoIntentsRunner {
   }
 
   private func getHandlerValue(name: String, source: String, in context: JSContext) -> JSValue? {
-    if let cached = handlerCache[name] {
-      return cached
+    if let cached = handlerCache[name], cached.source == source {
+      return cached.value
     }
     context.exception = nil
     guard let value = context.evaluateScript("(\(source))"),
@@ -225,7 +228,7 @@ public final class ExpoIntentsRunner {
           context.exception == nil else {
       return nil
     }
-    handlerCache[name] = value
+    handlerCache[name] = (source, value)
     return value
   }
 
