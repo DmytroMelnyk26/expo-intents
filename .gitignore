@@ -55,3 +55,7 @@ yarn-error.log
 
 # Expo
 .expo/*
+/tmp/*
+
+# TypeScript incremental build info
+*.tsbuildinfo

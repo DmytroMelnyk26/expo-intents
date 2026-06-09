@@ -6,6 +6,8 @@
   "types": "build/index.d.ts",
   "scripts": {
     "build": "node internal/module_scripts/build.js",
+    "build:plugin": "tsc -p plugin/tsconfig.json",
+    "build:bundle": "node ./scripts/build-bundle.mjs",
     "clean": "node internal/module_scripts/clean.js",
     "lint": "eslint src/",
     "test": "node internal/module_scripts/test.js",
@@ -29,7 +31,9 @@
   "dependencies": {},
   "devDependencies": {
     "@babel/core": "^7.26.0",
+    "@expo/spawn-async": "^1.8.0",
     "@types/jest": "^29.2.1",
+    "@types/node": "^22.14.0",
     "@types/react": "~19.1.1",
     "babel-preset-expo": "~55.0.8",
     "eslint": "~9.39.4",
@@ -39,6 +43,7 @@
     "jest-expo": "~55.0.9",
     "prettier": "^3.0.0",
     "react-native": "0.82.1",
+    "resolve-workspace-root": "^2.0.0",
     "typescript": "^5.9.2"
   },
   "jest": {
