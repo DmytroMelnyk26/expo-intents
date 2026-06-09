@@ -1,88 +1,103 @@
 import Foundation
 import JavaScriptCore
 
-/// Executes App Intent handlers inside a bare `JSContext`.
+/// Executes user JavaScript (intent handlers and entity-query functions) inside a bare `JSContext`.
 ///
-/// App Intents run in a process without a live React Native runtime, so we evaluate the
-/// standalone `ExpoIntents.bundle` (built by Metro — see `scripts/build-bundle.mjs`) once,
-/// then for each intent invocation we:
-///   1. read the user's serialised handler source from the App Group store,
-///   2. evaluate it and assign it to `globalThis.__expoIntentHandler`,
-///   3. call `globalThis.__expoIntentPerform(params, context)` and await the returned Promise.
+/// App Intents run in a process without a live React Native runtime, so we evaluate the standalone
+/// `ExpoIntents.bundle` (built by Metro — see `scripts/build-bundle.mjs`) once, then for each call:
+///   1. read the serialised function source from the App Group store,
+///   2. evaluate it to a function value (cached, re-evaluated when the source changes),
+///   3. call it through `globalThis.__expoIntentInvoke(fn, args)` and await the returned Promise.
 ///
-/// The generated Swift `AppIntent` structs (produced by the config plugin) call
-/// `ExpoIntentsRunner.shared.perform(handler:params:)` from their `perform()` method.
+/// The generated Swift `AppIntent` / `EntityQuery` types call `perform(handler:params:)` and
+/// `queryEntities(type:method:arg:)` respectively.
 public final class ExpoIntentsRunner {
   public static let shared = ExpoIntentsRunner()
 
   private let queue = DispatchQueue(label: "expo.intents.runner")
   private var context: JSContext?
   private var bundleScript: String?
-  // Cached per handler name, tagged with the source it was evaluated from. When the stored source
-  // changes (e.g. Fast Refresh re-registers an edited handler), we re-evaluate instead of serving
-  // the stale value — so editing handler JS takes effect on the next trigger without a rebuild.
-  private var handlerCache: [String: (source: String, value: JSValue)] = [:]
+  // Cached per call site, tagged with the source it was evaluated from. When the stored source
+  // changes (e.g. Fast Refresh re-registers an edited function), we re-evaluate instead of serving
+  // the stale value — so editing JS takes effect on the next trigger without a rebuild.
+  private var functionCache: [String: (source: String, value: JSValue)] = [:]
 
   private init() {}
 
-  /// Runs the handler registered under `name` with `params` and returns its result as a string
-  /// (objects are JSON-serialised). Throws if the handler is missing or the JS rejects/throws.
+  // MARK: - Public API
+
+  /// Runs the intent handler registered under `name` and returns its result as a string (objects
+  /// are JSON-serialised). Throws if the handler is missing or the JS rejects/throws.
   public func perform(handler name: String, params: [String: Any]) async throws -> String {
     guard let source = IntentsStorage.shared.handlerSource(for: name) else {
       throw ExpoIntentsError(message: "No registered handler for intent '\(name)'.")
     }
+    let context: [String: Any] = ["intentName": name]
+    let value = try await callFunction(source: source, cacheKey: "handler.\(name)", args: [params, context])
+    return stringify(value)
+  }
 
-    return try await withCheckedThrowingContinuation { continuation in
-      queue.async {
-        self.invoke(name: name, source: source, params: params, continuation: continuation)
-      }
+  /// Runs an entity-query method (`suggested` / `find` / `get`) registered for `type` and returns
+  /// the resulting array of entity dictionaries. Returns `[]` when the method isn't registered.
+  public func queryEntities(type: String, method: String, arg: Any?) async throws -> [[String: Any]] {
+    guard let source = IntentsStorage.shared.entityQuerySource(type: type, method: method) else {
+      return []
     }
+    let args: [Any] = arg.map { [$0] } ?? []
+    let value = try await callFunction(source: source, cacheKey: "entity.\(type).\(method)", args: args)
+    guard let array = value?.toArray() else {
+      return []
+    }
+    return array.compactMap { $0 as? [String: Any] }
   }
 
   // MARK: - JS invocation
 
+  private func callFunction(source: String, cacheKey: String, args: [Any]) async throws -> JSValue? {
+    try await withCheckedThrowingContinuation { continuation in
+      queue.async {
+        self.invoke(source: source, cacheKey: cacheKey, args: args, continuation: continuation)
+      }
+    }
+  }
+
   private func invoke(
-    name: String,
     source: String,
-    params: [String: Any],
-    continuation: CheckedContinuation<String, Error>
+    cacheKey: String,
+    args: [Any],
+    continuation: CheckedContinuation<JSValue?, Error>
   ) {
     guard let context = getContext() else {
       continuation.resume(throwing: ExpoIntentsError(message: "Could not create a JSContext."))
       return
     }
-    guard let handler = getHandlerValue(name: name, source: source, in: context) else {
-      let message = exceptionMessage(context) ?? "Could not evaluate handler for '\(name)'."
+    guard let function = getCachedFunction(cacheKey: cacheKey, source: source, in: context) else {
+      let message = exceptionMessage(context) ?? "Could not evaluate function for '\(cacheKey)'."
       continuation.resume(throwing: ExpoIntentsError(message: message))
       return
     }
-
-    context.exception = nil
-    context.setObject(handler, forKeyedSubscript: "__expoIntentHandler" as NSString)
-
-    guard let perform = context.objectForKeyedSubscript("__expoIntentPerform"),
-          perform.isObject else {
+    guard let invoke = context.objectForKeyedSubscript("__expoIntentInvoke"), invoke.isObject else {
       continuation.resume(
-        throwing: ExpoIntentsError(message: "ExpoIntents runtime is not initialised (__expoIntentPerform missing).")
+        throwing: ExpoIntentsError(message: "ExpoIntents runtime is not initialised (__expoIntentInvoke missing).")
       )
       return
     }
 
+    context.exception = nil
     var didResume = false
-    let resolve: @convention(block) (JSValue?) -> Void = { [weak self] value in
+    let resolve: @convention(block) (JSValue?) -> Void = { value in
       guard !didResume else { return }
       didResume = true
-      continuation.resume(returning: self?.stringify(value, in: context) ?? "")
+      continuation.resume(returning: value)
     }
     let reject: @convention(block) (JSValue?) -> Void = { error in
       guard !didResume else { return }
       didResume = true
-      let message = error?.toString() ?? "Intent handler rejected."
+      let message = error?.toString() ?? "JavaScript function rejected."
       continuation.resume(throwing: ExpoIntentsError(message: message))
     }
 
-    let handlerContext: [String: Any] = ["intentName": name]
-    let promise = perform.call(withArguments: [params, handlerContext])
+    let promise = invoke.call(withArguments: [function, args])
     if let message = exceptionMessage(context) {
       if !didResume {
         didResume = true
@@ -124,6 +139,20 @@ public final class ExpoIntentsRunner {
 
     self.context = context
     return context
+  }
+
+  private func getCachedFunction(cacheKey: String, source: String, in context: JSContext) -> JSValue? {
+    if let cached = functionCache[cacheKey], cached.source == source {
+      return cached.value
+    }
+    context.exception = nil
+    guard let value = context.evaluateScript("(\(source))"),
+          !value.isUndefined,
+          context.exception == nil else {
+      return nil
+    }
+    functionCache[cacheKey] = (source, value)
+    return value
   }
 
   // MARK: - Native primitives
@@ -218,30 +247,17 @@ public final class ExpoIntentsRunner {
     return script
   }
 
-  private func getHandlerValue(name: String, source: String, in context: JSContext) -> JSValue? {
-    if let cached = handlerCache[name], cached.source == source {
-      return cached.value
-    }
-    context.exception = nil
-    guard let value = context.evaluateScript("(\(source))"),
-          !value.isUndefined,
-          context.exception == nil else {
-      return nil
-    }
-    handlerCache[name] = (source, value)
-    return value
-  }
-
   // MARK: - Helpers
 
-  private func stringify(_ value: JSValue?, in context: JSContext) -> String {
+  private func stringify(_ value: JSValue?) -> String {
     guard let value, !value.isUndefined, !value.isNull else {
       return ""
     }
     if value.isString {
       return value.toString() ?? ""
     }
-    if let json = context.objectForKeyedSubscript("JSON"),
+    if let context = value.context,
+       let json = context.objectForKeyedSubscript("JSON"),
        let serialised = json.invokeMethod("stringify", withArguments: [value]),
        serialised.isString {
       return serialised.toString() ?? ""

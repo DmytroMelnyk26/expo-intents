@@ -2,10 +2,11 @@ import { ConfigPlugin, withPlugins } from 'expo/config-plugins';
 
 import withAppGroupEntitlements from './withAppGroupEntitlements';
 import withGeneratedIntentsSource from './withGeneratedIntentsSource';
-import { IntentConfig } from '../types';
+import { IntentConfig, IntentEntityConfig } from '../types';
 
 type IosIntentsProps = {
   intents: IntentConfig[];
+  entities: IntentEntityConfig[];
   groupIdentifier?: string;
 };
 
@@ -21,7 +22,7 @@ const withIosIntents: ConfigPlugin<IosIntentsProps> = (config, props) => {
 
   return withPlugins(config, [
     [withAppGroupEntitlements, { groupIdentifier }],
-    [withGeneratedIntentsSource, { intents: props.intents }],
+    [withGeneratedIntentsSource, { intents: props.intents, entities: props.entities }],
   ]);
 };
 

@@ -9,6 +9,7 @@ const withIntents: ConfigPlugin<ExpoIntentsConfigPluginProps | undefined> = (con
   // iOS-only: Android App Actions have no background-execution equivalent.
   return withIosIntents(config, {
     intents: props?.intents ?? [],
+    entities: props?.entities ?? [],
     groupIdentifier: props?.groupIdentifier,
   });
 };

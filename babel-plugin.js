@@ -6,21 +6,24 @@
  * cannot serialise at runtime — instead this plugin serialises, at compile time, any function
  * carrying the `'intent'` directive into a string literal of its own source.
  *
- * Add it to your babel.config.js plugins, then mark handlers:
- *
  *   registerIntentHandler('getGreeting', async (params, context) => {
  *     'intent';
  *     return 'Hello ' + (getSharedData('user') ?? 'world');
  *   });
  *
- * Modelled on babel-preset-expo's widgets plugin (the `'widget'` directive).
+ * Why on `enter` + source slicing (and not @babel/generator on `exit`, like the upstream widgets
+ * plugin): handlers are typically `async`, and babel-preset-expo's async-to-generator transform
+ * rewrites the function before an `exit` visitor runs, leaving the original outer function for
+ * Hermes to turn into "[bytecode]". By transforming on `enter` we win the race — we replace the
+ * function with a string before any other transform touches it. We grab the verbatim source via
+ * the node's offsets into the original file, then strip TypeScript ourselves so the stored string
+ * is plain, evaluatable JS.
  */
 
 const DIRECTIVE = 'intent';
 
 module.exports = function expoIntentsBabelPlugin(api) {
   const { types: t } = api;
-  const generate = requireGenerator();
 
   function hasIntentDirective(node) {
     return (
@@ -32,39 +35,58 @@ module.exports = function expoIntentsBabelPlugin(api) {
     );
   }
 
-  function removeIntentDirective(body) {
-    const index = body.directives.findIndex(
-      (directive) => t.isDirectiveLiteral(directive.value) && directive.value.value === DIRECTIVE
-    );
-    if (index !== -1) {
-      body.directives.splice(index, 1);
+  function sourceLiteral(path, state) {
+    const node = path.node;
+    const code = state.file && state.file.code;
+    let source;
+    if (typeof code === 'string' && node.start != null && node.end != null) {
+      source = code.slice(node.start, node.end);
+    } else {
+      // Fallback for synthetic nodes without source positions.
+      source = require('@babel/generator').default(node, { compact: true }).code;
     }
+    const stripped = stripTypeScript(source);
+    const raw = stripped.replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+    return t.templateLiteral([t.templateElement({ raw, cooked: raw }, true)], []);
   }
 
-  function toSourceLiteral(node) {
-    const expression = t.functionExpression(
-      null,
-      node.params,
-      node.body,
-      node.generator,
-      node.async
-    );
-    const code = generate(expression, { compact: true }).code;
-    const raw = code.replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
-    return t.templateLiteral([t.templateElement({ raw, cooked: raw }, true)], []);
+  function stripTypeScript(source) {
+    try {
+      const result = api.transformSync(`(${source})`, {
+        configFile: false,
+        babelrc: false,
+        comments: false,
+        compact: true,
+        filename: 'expo-intent-handler.tsx',
+        presets: [require('@babel/preset-typescript')],
+      });
+      if (result && typeof result.code === 'string') {
+        return result.code.trim().replace(/;$/, '');
+      }
+    } catch {
+      // Fall through to the raw (possibly TS-laden) source; better than dropping the handler.
+    }
+    return `(${source})`;
   }
 
   return {
     name: 'expo-intents',
     visitor: {
-      ['FunctionDeclaration|FunctionExpression']: {
-        exit(path) {
+      ['ArrowFunctionExpression|FunctionExpression']: {
+        enter(path, state) {
           if (!hasIntentDirective(path.node)) {
             return;
           }
-          removeIntentDirective(path.node.body);
-          const literal = toSourceLiteral(path.node);
-
+          path.replaceWith(sourceLiteral(path, state));
+          path.skip();
+        },
+      },
+      FunctionDeclaration: {
+        enter(path, state) {
+          if (!hasIntentDirective(path.node)) {
+            return;
+          }
+          const literal = sourceLiteral(path, state);
           if (path.parentPath.isExportDefaultDeclaration()) {
             path.parentPath.replaceWith(t.exportDefaultDeclaration(literal));
           } else if (path.node.id) {
@@ -74,22 +96,9 @@ module.exports = function expoIntentsBabelPlugin(api) {
           } else {
             path.replaceWith(literal);
           }
-        },
-      },
-      ArrowFunctionExpression: {
-        exit(path) {
-          if (!hasIntentDirective(path.node)) {
-            return;
-          }
-          removeIntentDirective(path.node.body);
-          path.replaceWith(toSourceLiteral(path.node));
+          path.skip();
         },
       },
     },
   };
 };
-
-function requireGenerator() {
-  const mod = require('@babel/generator');
-  return mod.default || mod;
-}

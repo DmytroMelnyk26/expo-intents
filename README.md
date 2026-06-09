@@ -72,8 +72,44 @@ In `app.json` / `app.config.js`, declare your intents:
 | `groupIdentifier` | App Group shared with the intents runtime. Defaults to `group.<ios.bundleIdentifier>`.       |
 
 **Intent fields:** `name` (must match `registerIntentHandler`), `title`, `description?`,
-`parameters?` (`{ name, type?: 'string' | 'number' | 'boolean', title? }`), `phrases?` (use
-`${applicationName}` for the app name).
+`parameters?`, `phrases?` (use `${applicationName}` for the app name).
+
+**Parameter fields** (`parameters: [{ … }]`):
+
+| Field      | Description                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `name`     | Property name and the `params` key the handler reads.                                              |
+| `type`     | `'string'` (default), `'number'`, `'boolean'`, `'date'`, or `'enum'`.                              |
+| `title`    | Label in the Shortcuts editor. Defaults to `name`.                                                 |
+| `optional` | If `true`, the parameter is optional; the handler receives `null` when empty. Ignored with `default`. |
+| `default`  | Default value. For `enum`, must equal one of the choice values. Not supported for `date`.          |
+| `choices`  | Required for `enum`: an array of `string` or `{ value, title? }`.                                  |
+
+How parameter values arrive in the handler's `params`:
+
+| `type`              | JS value                                  |
+| ------------------- | ----------------------------------------- |
+| `string`            | `string`                                  |
+| `number`            | `number`                                  |
+| `boolean`           | `boolean`                                 |
+| `date`              | `Date`                                    |
+| `enum`              | `string` (the selected choice's value)    |
+| optional, when empty | `null`                                   |
+
+Example with the newer types:
+
+```json
+{
+  "name": "createReminder",
+  "title": "Create Reminder",
+  "parameters": [
+    { "name": "text", "type": "string", "title": "Text" },
+    { "name": "priority", "type": "enum", "title": "Priority", "default": "medium",
+      "choices": ["low", { "value": "medium", "title": "Medium" }, "high"] },
+    { "name": "due", "type": "date", "title": "Due", "optional": true }
+  ]
+}
+```
 
 The plugin adds the **App Groups** entitlement automatically. On a physical device, make sure
 App Groups is enabled for your bundle id in your Apple Developer account.
@@ -154,6 +190,62 @@ removeSharedData('token');
 `setSharedData` is also how you pass app state (auth tokens, current user, …) to handlers that run
 while the app is closed.
 
+### Entity parameters (pick from your data)
+
+To let the user pick one of your app's objects (a task, place, note, …) as a parameter, declare an
+**entity** and back it with query functions in JS. The Shortcuts picker shows your real data, with
+an optional search field — the queries run in the App Intents runtime and can `fetch` from a server.
+
+1. Declare the entity and reference it from a parameter in the config plugin:
+
+```json
+{
+  "entities": [{ "name": "Task", "title": "Task", "searchable": true }],
+  "intents": [
+    {
+      "name": "completeTask",
+      "title": "Complete Task",
+      "parameters": [{ "name": "task", "type": "entity", "entity": "Task", "title": "Task" }]
+    }
+  ]
+}
+```
+
+2. Register the query functions (each marked with `'intent'`):
+
+```ts
+import { registerEntityQuery, registerIntentHandler } from 'expo-intents';
+
+registerEntityQuery('Task', {
+  // default suggestions before the user searches
+  suggested: async () => {
+    'intent';
+    const res = await fetch('https://api.example.com/tasks');
+    return (await res.json()).items; // [{ id, title, subtitle? }]
+  },
+  // search field results (omit to disable search)
+  find: async (query) => {
+    'intent';
+    const res = await fetch(`https://api.example.com/tasks?q=${query}`);
+    return (await res.json()).items;
+  },
+  // resolve ids → entities (so saved shortcuts can rehydrate their selection)
+  get: async (ids) => {
+    'intent';
+    const res = await fetch(`https://api.example.com/tasks?ids=${ids.join(',')}`);
+    return (await res.json()).items;
+  },
+});
+
+registerIntentHandler<{ task: { id: string; title: string } }>('completeTask', async (params) => {
+  'intent';
+  return `Completed: ${params.task.title}`; // the full selected entity arrives in params
+});
+```
+
+Each entity item must have a string `id` and `title`; `subtitle` is optional secondary text. Any
+extra fields are passed through to the handler when the entity is selected.
+
 ## API
 
 ### `registerIntentHandler(name, handler)`
@@ -165,6 +257,11 @@ directive. Persisted to the App Group store, so call it once per launch.
 
 Read/write JSON-serialisable values in the App Group store shared with the intents runtime.
 
+### `registerEntityQuery(typeName, { suggested?, find?, get })`
+
+Registers the query functions backing an `entity` parameter's picker. Each function must be marked
+with the `'intent'` directive. `get` is required (resolves ids for saved shortcuts).
+
 ## Return values
 
 Handlers currently return a **string** (objects are JSON-serialised). The value is exposed to
@@ -173,11 +270,11 @@ Shortcuts as the intent's result and can be chained into other actions.
 ## Limitations / roadmap
 
 - iOS only.
-- Parameter types: `string`, `number`, `boolean`. (Entities, enums, and optional parameters are
-  on the roadmap.)
+- Parameter types: `string`, `number`, `boolean`, `date`, `enum`, `entity` (with `optional` and
+  `default`). Arrays, files, and measurements are on the roadmap.
 - Return type is always a string today; richer `IntentResult` shapes (dialogs, snippets) are
   planned.
-- `EntityQuery`, `requestValue`, and `requestConfirmation` are not yet exposed.
+- `requestValue`, `requestDisambiguation`, and `requestConfirmation` are not yet exposed.
 
 ## License
 

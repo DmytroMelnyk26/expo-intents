@@ -42,8 +42,31 @@
                 { "name": "message", "type": "string", "title": "Message" },
                 { "name": "loud", "type": "boolean", "title": "Shout" }
               ]
+            },
+            {
+              "name": "createReminder",
+              "title": "Create Reminder",
+              "description": "Demonstrates enum, optional, default and date parameters.",
+              "parameters": [
+                { "name": "text", "type": "string", "title": "Text" },
+                {
+                  "name": "priority",
+                  "type": "enum",
+                  "title": "Priority",
+                  "default": "medium",
+                  "choices": ["low", { "value": "medium", "title": "Medium" }, "high"]
+                },
+                { "name": "due", "type": "date", "title": "Due", "optional": true }
+              ]
+            },
+            {
+              "name": "completeTask",
+              "title": "Complete Task",
+              "description": "Pick one of your tasks (entity picker backed by JS).",
+              "parameters": [{ "name": "task", "type": "entity", "entity": "Task", "title": "Task" }]
             }
-          ]
+          ],
+          "entities": [{ "name": "Task", "title": "Task", "searchable": true }]
         }
       ]
     ]
