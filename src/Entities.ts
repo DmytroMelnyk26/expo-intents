@@ -15,6 +15,12 @@ export type EntityItem = {
   [key: string]: unknown;
 };
 
+/** Context passed as the last argument to every entity-query function. */
+export type EntityQueryContext = {
+  /** The device's current language as a BCP-47 tag (e.g. `"uk-UA"`), for localising titles. */
+  locale: string;
+};
+
 /**
  * The functions that back an entity type's picker. Like intent handlers, each runs in the bare
  * App Intents runtime, so every function must be marked with the `'intent'` directive and may only
@@ -22,11 +28,11 @@ export type EntityItem = {
  */
 export type EntityQueryHandlers = {
   /** Default suggestions shown before the user searches. */
-  suggested?: () => EntityItem[] | Promise<EntityItem[]>;
+  suggested?: (context: EntityQueryContext) => EntityItem[] | Promise<EntityItem[]>;
   /** Search results for the user's query. Omit to disable the search field. */
-  find?: (query: string) => EntityItem[] | Promise<EntityItem[]>;
+  find?: (query: string, context: EntityQueryContext) => EntityItem[] | Promise<EntityItem[]>;
   /** Resolves ids back into entities — required so saved shortcuts can rehydrate their selection. */
-  get: (ids: string[]) => EntityItem[] | Promise<EntityItem[]>;
+  get: (ids: string[], context: EntityQueryContext) => EntityItem[] | Promise<EntityItem[]>;
 };
 
 /**

@@ -10,6 +10,7 @@ const withIntents: ConfigPlugin<ExpoIntentsConfigPluginProps | undefined> = (con
   return withIosIntents(config, {
     intents: props?.intents ?? [],
     entities: props?.entities ?? [],
+    defaultLocale: props?.defaultLocale ?? 'en',
     groupIdentifier: props?.groupIdentifier,
   });
 };

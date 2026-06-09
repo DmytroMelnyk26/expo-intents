@@ -22,9 +22,18 @@ export default function App() {
     setSharedData('user', 'Username');
     registerIntentHandler('getGreeting', async (_params, context) => {
       'intent';
+      // Defined inside the handler: it runs in the bare runtime and can't close over outer scope.
+      const greetings: Record<string, string> = {
+        en: 'Hello',
+        uk: 'Привіт',
+        es: 'Hola',
+        de: 'Hallo',
+      };
+      const lang = context.locale.split('-')[0];
+      const greeting = greetings[lang] ?? greetings.en;
       const user = getSharedData<string>('user') ?? 'world';
       console.log('getGreeting handler ran for', context.intentName);
-      return `Hello, ${user}!`;
+      return `${greeting}, ${user}!`;
     });
 
     registerIntentHandler<{ message: string; loud: boolean }>('echo', async (params) => {

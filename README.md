@@ -246,6 +246,46 @@ registerIntentHandler<{ task: { id: string; title: string } }>('completeTask', a
 Each entity item must have a string `id` and `title`; `subtitle` is optional secondary text. Any
 extra fields are passed through to the handler when the entity is selected.
 
+## Localization
+
+Two layers localize independently.
+
+**Static metadata** (titles, descriptions, parameter/enum/entity labels, Siri phrases) — pass a
+`{ [locale]: string }` map anywhere a string is accepted, and set `defaultLocale` (the source
+language, default `'en'`). The plugin generates `Localizable.xcstrings` and per-locale
+`AppShortcuts.strings`, and registers the locales.
+
+```json
+{
+  "defaultLocale": "en",
+  "intents": [
+    {
+      "name": "getGreeting",
+      "title": { "en": "Get Greeting", "uk": "Отримати привітання" },
+      "phrases": {
+        "en": ["Get greeting from ${applicationName}"],
+        "uk": ["Привітання від ${applicationName}"]
+      }
+    }
+  ]
+}
+```
+
+Phrase lists correspond positionally — give each locale the same number of phrases as the source.
+
+**Dynamic content** (handler results, entity titles) — localize it yourself in JS using the
+device locale, passed as `context.locale` (BCP-47, e.g. `"uk-UA"`):
+
+```ts
+registerIntentHandler('getGreeting', async (params, context) => {
+  'intent';
+  const hello = context.locale.startsWith('uk') ? 'Привіт' : 'Hello';
+  return `${hello}!`;
+});
+```
+
+Entity-query functions receive the same context as their last argument: `find(query, context)`.
+
 ## API
 
 ### `registerIntentHandler(name, handler)`
@@ -272,6 +312,7 @@ Shortcuts as the intent's result and can be chained into other actions.
 - iOS only.
 - Parameter types: `string`, `number`, `boolean`, `date`, `enum`, `entity` (with `optional` and
   `default`). Arrays, files, and measurements are on the roadmap.
+- Localization: static metadata via `{ [locale]: … }` maps; dynamic content via `context.locale`.
 - Return type is always a string today; richer `IntentResult` shapes (dialogs, snippets) are
   planned.
 - `requestValue`, `requestDisambiguation`, and `requestConfirmation` are not yet exposed.

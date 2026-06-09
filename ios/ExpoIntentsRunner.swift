@@ -32,7 +32,7 @@ public final class ExpoIntentsRunner {
     guard let source = IntentsStorage.shared.handlerSource(for: name) else {
       throw ExpoIntentsError(message: "No registered handler for intent '\(name)'.")
     }
-    let context: [String: Any] = ["intentName": name]
+    let context: [String: Any] = ["intentName": name, "locale": currentLocale()]
     let value = try await callFunction(source: source, cacheKey: "handler.\(name)", args: [params, context])
     return stringify(value)
   }
@@ -43,7 +43,10 @@ public final class ExpoIntentsRunner {
     guard let source = IntentsStorage.shared.entityQuerySource(type: type, method: method) else {
       return []
     }
-    let args: [Any] = arg.map { [$0] } ?? []
+    // The query's own argument (string / [String]) comes first, then a context object — so the JS
+    // signatures are `suggested(ctx)`, `find(query, ctx)`, `get(ids, ctx)`.
+    var args: [Any] = arg.map { [$0] } ?? []
+    args.append(["locale": currentLocale()])
     let value = try await callFunction(source: source, cacheKey: "entity.\(type).\(method)", args: args)
     guard let array = value?.toArray() else {
       return []
@@ -248,6 +251,12 @@ public final class ExpoIntentsRunner {
   }
 
   // MARK: - Helpers
+
+  /// The device's current language as a BCP-47 tag (e.g. "uk-UA"), passed to JS so handlers and
+  /// entity queries can localise their dynamic output.
+  private func currentLocale() -> String {
+    Locale.preferredLanguages.first ?? Locale.current.identifier
+  }
 
   private func stringify(_ value: JSValue?) -> String {
     guard let value, !value.isUndefined, !value.isNull else {
