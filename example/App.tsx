@@ -29,6 +29,15 @@ export default function App() {
       const text = `You said: ${params.message}`;
       return params.loud ? text.toUpperCase() : text;
     });
+
+    registerIntentHandler<{ text: string; priority: string; due: Date | null }>(
+      'createReminder',
+      async (params) => {
+        'intent';
+        const when = params.due ? params.due.toLocaleDateString() : 'no due date';
+        return `[${params.priority}] ${params.text} (${when})`;
+      }
+    );
   }, []);
 
   const runRoundTrip = () => {
