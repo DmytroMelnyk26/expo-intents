@@ -1,5 +1,5 @@
 /** Value type of an intent parameter. Maps to a Swift `@Parameter` type and a JS `params` value. */
-export type IntentParameterType = 'string' | 'number' | 'boolean' | 'date' | 'enum';
+export type IntentParameterType = 'string' | 'number' | 'boolean' | 'date' | 'enum' | 'entity';
 
 /**
  * A choice for an `enum` parameter. A bare string uses the same text as both the stored value and
@@ -30,6 +30,29 @@ export type IntentParameter = {
   default?: string | number | boolean;
   /** The available choices. Required when `type` is `'enum'`. */
   choices?: IntentEnumChoice[];
+  /**
+   * The entity type name this parameter resolves to. Required when `type` is `'entity'`; must
+   * match an entry in the plugin's `entities`. The handler receives the selected entity object.
+   */
+  entity?: string;
+};
+
+/**
+ * Declarative description of an `AppEntity` type — a piece of the app's data the user can pick as
+ * an intent parameter (a task, place, note, …). The config plugin generates the Swift `AppEntity`
+ * and its `EntityQuery`, whose `suggested` / `find` / `get` methods delegate to the JS functions
+ * registered with `registerEntityQuery(name, …)`.
+ */
+export type IntentEntityConfig = {
+  /** Entity type name. Referenced by parameters via `entity` and by `registerEntityQuery`. */
+  name: string;
+  /** Type display name shown by the system. Defaults to `name`. */
+  title?: string;
+  /**
+   * Whether the Shortcuts picker offers a search field backed by the JS `find` function
+   * (Swift `EntityStringQuery`). Defaults to `true`.
+   */
+  searchable?: boolean;
 };
 
 /**
@@ -64,4 +87,6 @@ export type ExpoIntentsConfigPluginProps = {
   groupIdentifier?: string;
   /** The intents to generate. */
   intents?: IntentConfig[];
+  /** The entity types referenced by `entity` parameters. */
+  entities?: IntentEntityConfig[];
 };

@@ -12,6 +12,7 @@ final class IntentsStorage {
 
   private static let handlerPrefix = "expo.intents.handler."
   private static let dataPrefix = "expo.intents.data."
+  private static let entityQueryPrefix = "expo.intents.entityquery."
 
   private init() {}
 
@@ -50,5 +51,16 @@ final class IntentsStorage {
 
   func removeSharedData(for key: String) {
     defaults.removeObject(forKey: Self.dataPrefix + key)
+  }
+
+  // MARK: - Entity query sources
+
+  /// Stores the serialised source of an entity-query method (`suggested` / `find` / `get`).
+  func setEntityQuerySource(_ source: String, type: String, method: String) {
+    defaults.set(source, forKey: Self.entityQueryPrefix + type + "." + method)
+  }
+
+  func entityQuerySource(type: String, method: String) -> String? {
+    defaults.string(forKey: Self.entityQueryPrefix + type + "." + method)
   }
 }

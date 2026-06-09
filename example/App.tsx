@@ -1,5 +1,6 @@
 import {
   getSharedData,
+  registerEntityQuery,
   registerIntentHandler,
   removeSharedData,
   setSharedData,
@@ -8,6 +9,8 @@ import { useEffect, useState } from 'react';
 import { Button, SafeAreaView, ScrollView, Text, View } from 'react-native';
 
 const KEY = 'phase2-roundtrip';
+
+type Task = { id: string; title: string; subtitle?: string };
 
 export default function App() {
   const [result, setResult] = useState<string>('(not run yet)');
@@ -36,6 +39,44 @@ export default function App() {
         'intent';
         const when = params.due ? params.due.toLocaleDateString() : 'no due date';
         return `[${params.priority}] ${params.text} (${when})`;
+      }
+    );
+
+    // Variant 3: entity picker backed by JS. The query functions run in the App Intents runtime
+    // (here from a static list; they could just as well `fetch` from a server).
+    setSharedData('tasks', [
+      { id: '1', title: 'Buy milk', subtitle: 'Groceries' },
+      { id: '2', title: 'Call mom', subtitle: 'Family' },
+      { id: '3', title: 'Ship release', subtitle: 'Work' },
+    ]);
+    registerEntityQuery('Task', {
+      suggested: async () => {
+        'intent';
+        return getSharedData<Task[]>('tasks') ?? [];
+      },
+      find: async (query) => {
+        'intent';
+        const tasks = getSharedData<Task[]>('tasks') ?? [];
+        const q = query.toLowerCase();
+        return tasks.filter(
+          (t) =>
+            t.id.toLowerCase().includes(q) ||
+            t.title.toLowerCase().includes(q) ||
+            t.subtitle?.toLowerCase().includes(q)
+        );
+      },
+      get: async (ids) => {
+        'intent';
+        const tasks = getSharedData<Task[]>('tasks') ?? [];
+        return tasks.filter((t) => ids.includes(t.id));
+      },
+    });
+
+    registerIntentHandler<{ task: { id: string; title: string } }>(
+      'completeTask',
+      async (params) => {
+        'intent';
+        return `Completed: ${params.task.title}`;
       }
     );
   }, []);

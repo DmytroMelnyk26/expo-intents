@@ -190,6 +190,62 @@ removeSharedData('token');
 `setSharedData` is also how you pass app state (auth tokens, current user, …) to handlers that run
 while the app is closed.
 
+### Entity parameters (pick from your data)
+
+To let the user pick one of your app's objects (a task, place, note, …) as a parameter, declare an
+**entity** and back it with query functions in JS. The Shortcuts picker shows your real data, with
+an optional search field — the queries run in the App Intents runtime and can `fetch` from a server.
+
+1. Declare the entity and reference it from a parameter in the config plugin:
+
+```json
+{
+  "entities": [{ "name": "Task", "title": "Task", "searchable": true }],
+  "intents": [
+    {
+      "name": "completeTask",
+      "title": "Complete Task",
+      "parameters": [{ "name": "task", "type": "entity", "entity": "Task", "title": "Task" }]
+    }
+  ]
+}
+```
+
+2. Register the query functions (each marked with `'intent'`):
+
+```ts
+import { registerEntityQuery, registerIntentHandler } from 'expo-intents';
+
+registerEntityQuery('Task', {
+  // default suggestions before the user searches
+  suggested: async () => {
+    'intent';
+    const res = await fetch('https://api.example.com/tasks');
+    return (await res.json()).items; // [{ id, title, subtitle? }]
+  },
+  // search field results (omit to disable search)
+  find: async (query) => {
+    'intent';
+    const res = await fetch(`https://api.example.com/tasks?q=${query}`);
+    return (await res.json()).items;
+  },
+  // resolve ids → entities (so saved shortcuts can rehydrate their selection)
+  get: async (ids) => {
+    'intent';
+    const res = await fetch(`https://api.example.com/tasks?ids=${ids.join(',')}`);
+    return (await res.json()).items;
+  },
+});
+
+registerIntentHandler<{ task: { id: string; title: string } }>('completeTask', async (params) => {
+  'intent';
+  return `Completed: ${params.task.title}`; // the full selected entity arrives in params
+});
+```
+
+Each entity item must have a string `id` and `title`; `subtitle` is optional secondary text. Any
+extra fields are passed through to the handler when the entity is selected.
+
 ## API
 
 ### `registerIntentHandler(name, handler)`
@@ -201,6 +257,11 @@ directive. Persisted to the App Group store, so call it once per launch.
 
 Read/write JSON-serialisable values in the App Group store shared with the intents runtime.
 
+### `registerEntityQuery(typeName, { suggested?, find?, get })`
+
+Registers the query functions backing an `entity` parameter's picker. Each function must be marked
+with the `'intent'` directive. `get` is required (resolves ids for saved shortcuts).
+
 ## Return values
 
 Handlers currently return a **string** (objects are JSON-serialised). The value is exposed to
@@ -209,8 +270,8 @@ Shortcuts as the intent's result and can be chained into other actions.
 ## Limitations / roadmap
 
 - iOS only.
-- Parameter types: `string`, `number`, `boolean`, `date`, `enum` (with `optional` and `default`).
-  Arrays, `AppEntity`/`EntityQuery`, files, and measurements are on the roadmap.
+- Parameter types: `string`, `number`, `boolean`, `date`, `enum`, `entity` (with `optional` and
+  `default`). Arrays, files, and measurements are on the roadmap.
 - Return type is always a string today; richer `IntentResult` shapes (dialogs, snippets) are
   planned.
 - `requestValue`, `requestDisambiguation`, and `requestConfirmation` are not yet exposed.

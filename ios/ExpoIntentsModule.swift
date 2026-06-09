@@ -24,5 +24,11 @@ public class ExpoIntentsModule: Module {
     Function("removeSharedData") { (key: String) in
       IntentsStorage.shared.removeSharedData(for: key)
     }
+
+    // Persists a serialised entity-query function so the App Intents runtime can fetch/search the
+    // app's entities later. `method` is one of "suggested", "find", "get".
+    Function("registerEntityHandler") { (type: String, method: String, source: String) in
+      IntentsStorage.shared.setEntityQuerySource(source, type: type, method: method)
+    }
   }
 }

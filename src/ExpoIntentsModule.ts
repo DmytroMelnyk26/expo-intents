@@ -14,6 +14,11 @@ declare class ExpoIntentsModule extends NativeModule {
   getSharedData(key: string): string | null;
   /** Removes the value stored under `key`. */
   removeSharedData(key: string): void;
+  /**
+   * Persists a serialised entity-query function so the App Intents runtime can fetch/search the
+   * app's entities. `method` is one of `'suggested'`, `'find'`, `'get'`.
+   */
+  registerEntityHandler(type: string, method: string, source: string): void;
 }
 
 export default requireNativeModule<ExpoIntentsModule>('ExpoIntents');

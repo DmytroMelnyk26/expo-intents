@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { generateIntentsSwift } from './generateIntentsSwift';
-import { IntentConfig } from '../types';
+import { IntentConfig, IntentEntityConfig } from '../types';
 
 const GENERATED_DIR = 'Intents';
 const GENERATED_FILE = 'ExpoGeneratedIntents.swift';
@@ -12,10 +12,10 @@ const GENERATED_FILE = 'ExpoGeneratedIntents.swift';
  * Writes the generated `AppIntent` Swift file into the main app target's source group and adds
  * it to the build phase, so the App Intents compiler extracts its metadata.
  */
-const withGeneratedIntentsSource: ConfigPlugin<{ intents: IntentConfig[] }> = (
-  config,
-  { intents }
-) => {
+const withGeneratedIntentsSource: ConfigPlugin<{
+  intents: IntentConfig[];
+  entities: IntentEntityConfig[];
+}> = (config, { intents, entities }) => {
   // 1. Write the Swift file to disk under <projectName>/Intents/.
   config = withDangerousMod(config, [
     'ios',
@@ -26,7 +26,7 @@ const withGeneratedIntentsSource: ConfigPlugin<{ intents: IntentConfig[] }> = (
       await fs.promises.mkdir(targetDir, { recursive: true });
       await fs.promises.writeFile(
         path.join(targetDir, GENERATED_FILE),
-        generateIntentsSwift(intents, appName)
+        generateIntentsSwift(intents, entities, appName)
       );
       return cfg;
     },

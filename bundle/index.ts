@@ -7,38 +7,34 @@
 //
 // IMPORTANT: there is NO React Native / Hermes runtime here. App Intents run in a process
 // where the RN bridge is not available, so this bundle must stay self-contained: plain JS
-// plus the native primitives that Swift injects into the context (see `polyfills.ts`).
+// plus the native primitives that Swift injects (see `polyfills.ts`).
 //
-// The bundle is a fixed runtime shim — it does NOT contain user handler code. The user's
-// handler is serialised with `Function.prototype.toString()` on the JS side, persisted to
-// the App Group store, and at execution time Swift evaluates it and assigns it to
-// `globalThis.__expoIntentHandler` before calling `__expoIntentPerform`.
+// The bundle is a fixed runtime shim — it does NOT contain user code. User functions (intent
+// handlers and entity-query functions) are serialised with the babel plugin, persisted, then
+// at execution time Swift evaluates a function from its source and calls it via
+// `__expoIntentInvoke`, which normalises sync/async results into a Promise the runner awaits.
 
 import { installPolyfills } from './polyfills';
 
-type Json = Record<string, unknown>;
-
 declare global {
-  // Set by Swift immediately before each call: the user's deserialised handler.
-  var __expoIntentHandler: ((params: Json, context: Json) => unknown) | undefined;
-  // Called by Swift to execute the current handler. Always resolves through a Promise so the
-  // Swift runner can `await` sync and async handlers uniformly.
-  var __expoIntentPerform: (params: Json, context: Json) => Promise<unknown>;
+  // Called by Swift to run a user function (handler or entity query). Always returns a Promise,
+  // so the Swift runner can `await` sync and async functions uniformly.
+  var __expoIntentInvoke: (
+    fn: (...args: unknown[]) => unknown,
+    args: unknown[]
+  ) => Promise<unknown>;
 }
 
 installPolyfills(globalThis as unknown as Record<string, unknown>);
 
-const __expoIntentPerform = function (params: Json, context: Json): Promise<unknown> {
-  const handler = globalThis.__expoIntentHandler;
-  if (typeof handler !== 'function') {
-    return Promise.reject(
-      new Error('[ExpoIntents] No intent handler was provided to the runtime.')
-    );
-  }
-  // Normalise sync and async handlers (and thrown errors) into a single Promise.
-  return Promise.resolve().then(() => handler(params, context));
+const __expoIntentInvoke = function (
+  fn: (...args: unknown[]) => unknown,
+  args: unknown[]
+): Promise<unknown> {
+  // Normalise sync and async functions (and synchronously thrown errors) into a single Promise.
+  return Promise.resolve().then(() => fn.apply(undefined, args));
 };
 
 Object.assign(globalThis, {
-  __expoIntentPerform,
+  __expoIntentInvoke,
 });

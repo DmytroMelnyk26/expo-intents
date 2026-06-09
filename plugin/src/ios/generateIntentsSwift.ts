@@ -1,15 +1,20 @@
-import { IntentConfig, IntentEnumChoice, IntentParameter } from '../types';
+import { IntentConfig, IntentEntityConfig, IntentEnumChoice, IntentParameter } from '../types';
 
 /**
  * Generates the Swift source containing one `AppIntent` struct per declared intent, any `AppEnum`
- * types backing `enum` parameters, plus an `AppShortcutsProvider` that registers them with
- * Siri / Spotlight.
+ * types backing `enum` parameters, `AppEntity` + `EntityQuery` types for declared entities, plus
+ * an `AppShortcutsProvider` that registers the intents with Siri / Spotlight.
  *
- * App Intents metadata is extracted by the compiler, so these structs must exist at build time.
- * Each `perform()` defers its logic to `ExpoIntentsRunner.shared.perform(handler:params:)`, which
- * runs the JS handler registered under the same `name`.
+ * App Intents metadata is extracted by the compiler, so these types must exist at build time.
+ * `perform()` defers to `ExpoIntentsRunner.shared.perform(handler:params:)` and entity queries to
+ * `ExpoIntentsRunner.shared.queryEntities(type:method:arg:)`, which run the registered JS.
  */
-export function generateIntentsSwift(intents: IntentConfig[], appName: string): string {
+export function generateIntentsSwift(
+  intents: IntentConfig[],
+  entities: IntentEntityConfig[],
+  appName: string
+): string {
+  validateEntityReferences(intents, entities);
   // `internal import` matches Expo's generated ExpoModulesProvider.swift, which is compiled into
   // the same app target. Mixing an explicit access level there with a bare `import` here trips
   // Swift's access-level-on-imports ambiguity diagnostic.
@@ -25,12 +30,34 @@ internal import ExpoIntents
 `;
   }
 
+  const entityTypes = generateEntities(entities);
   const enums = generateEnums(intents);
   const structs = intents.map((intent) => generateIntentStruct(intent)).join('\n\n');
   const shortcuts = generateShortcutsProvider(intents, appName);
 
-  const sections = [header, ...enums, structs, shortcuts].filter(Boolean);
+  const sections = [header, ...entityTypes, ...enums, structs, shortcuts].filter(Boolean);
   return `${sections.join('\n\n')}\n`;
+}
+
+function validateEntityReferences(intents: IntentConfig[], entities: IntentEntityConfig[]): void {
+  const declared = new Set(entities.map((entity) => entity.name));
+  for (const intent of intents) {
+    for (const parameter of intent.parameters ?? []) {
+      if (parameter.type !== 'entity') {
+        continue;
+      }
+      if (!parameter.entity) {
+        throw new Error(
+          `expo-intents: entity parameter "${parameter.name}" of intent "${intent.name}" must set "entity".`
+        );
+      }
+      if (!declared.has(parameter.entity)) {
+        throw new Error(
+          `expo-intents: parameter "${parameter.name}" of intent "${intent.name}" references entity "${parameter.entity}", which is not declared in the plugin's "entities".`
+        );
+      }
+    }
+  }
 }
 
 // MARK: - Intent structs
@@ -93,6 +120,9 @@ function swiftParamType(intent: IntentConfig, parameter: IntentParameter): strin
     case 'enum':
       base = enumTypeName(intent, parameter);
       break;
+    case 'entity':
+      base = entityTypeName(parameter.entity!);
+      break;
     case 'string':
     default:
       base = 'String';
@@ -115,12 +145,24 @@ function isOptional(parameter: IntentParameter): boolean {
 function paramValueExpr(parameter: IntentParameter): string {
   const name = parameter.name;
   const isEnum = parameter.type === 'enum';
-  if (isOptional(parameter)) {
-    const mapped = isEnum ? `$0.rawValue as Any` : `$0 as Any`;
-    return `${name}.map { ${mapped} } ?? NSNull()`;
+  const isEntity = parameter.type === 'entity';
+  // The value expression for a single (non-optional) parameter.
+  const single = isEnum
+    ? `${name}.rawValue` // the enum's String rawValue (the underlying choice value)
+    : isEntity
+      ? `ExpoEntityData.parse(${name}.json)` // the full selected entity object
+      : name;
+  if (!isOptional(parameter)) {
+    return single;
   }
-  // Pass the enum's String rawValue (the underlying choice value) to JS; others pass directly.
-  return isEnum ? `${name}.rawValue` : name;
+  // Optionals collapse to `Any` via `.map { … as Any } ?? NSNull()` — `x ?? NSNull()` alone would
+  // not type-check (the `??` operands must share a type). JSC bridges `Date` → JS Date, `NSNull` → null.
+  const mapped = isEnum
+    ? `$0.rawValue as Any`
+    : isEntity
+      ? `ExpoEntityData.parse($0.json)`
+      : `$0 as Any`;
+  return `${name}.map { ${mapped} } ?? NSNull()`;
 }
 
 function swiftDefault(intent: IntentConfig, parameter: IntentParameter): string {
@@ -143,10 +185,83 @@ function swiftDefault(intent: IntentConfig, parameter: IntentParameter): string 
       }
       return `.${choice.caseName}`;
     }
+    case 'entity':
+      throw new Error(
+        `expo-intents: entity parameter "${parameter.name}" of intent "${intent.name}" cannot have a default.`
+      );
     case 'string':
     default:
       return swiftString(String(value));
   }
+}
+
+// MARK: - Entities (AppEntity + EntityQuery)
+
+function entityTypeName(name: string): string {
+  return `${pascal(name)}AppEntity`;
+}
+
+function entityQueryName(name: string): string {
+  return `${pascal(name)}EntityQuery`;
+}
+
+function generateEntities(entities: IntentEntityConfig[]): string[] {
+  return entities.flatMap((entity) => {
+    const typeName = entityTypeName(entity.name);
+    const queryName = entityQueryName(entity.name);
+    const searchable = entity.searchable !== false;
+    const nameLiteral = swiftString(entity.name);
+
+    const entityStruct = `@available(iOS 16.4, *)
+struct ${typeName}: AppEntity {
+  let id: String
+  let title: String
+  let subtitle: String?
+  let json: String
+
+  init(_ data: ExpoEntityData) {
+    self.id = data.id
+    self.title = data.title
+    self.subtitle = data.subtitle
+    self.json = data.json
+  }
+
+  static var typeDisplayRepresentation: TypeDisplayRepresentation = ${swiftString(
+    entity.title ?? entity.name
+  )}
+  var displayRepresentation: DisplayRepresentation {
+    if let subtitle {
+      return DisplayRepresentation(title: "\\(title)", subtitle: "\\(subtitle)")
+    }
+    return DisplayRepresentation(title: "\\(title)")
+  }
+  static var defaultQuery = ${queryName}()
+}`;
+
+    const findMethod = searchable
+      ? `
+
+  func entities(matching string: String) async throws -> [${typeName}] {
+    try await ExpoIntentsRunner.shared.queryEntities(type: ${nameLiteral}, method: "find", arg: string)
+      .compactMap(ExpoEntityData.init).map(${typeName}.init)
+  }`
+      : '';
+
+    const queryStruct = `@available(iOS 16.4, *)
+struct ${queryName}: ${searchable ? 'EntityStringQuery' : 'EntityQuery'} {
+  func entities(for identifiers: [String]) async throws -> [${typeName}] {
+    try await ExpoIntentsRunner.shared.queryEntities(type: ${nameLiteral}, method: "get", arg: identifiers)
+      .compactMap(ExpoEntityData.init).map(${typeName}.init)
+  }
+
+  func suggestedEntities() async throws -> [${typeName}] {
+    try await ExpoIntentsRunner.shared.queryEntities(type: ${nameLiteral}, method: "suggested", arg: nil)
+      .compactMap(ExpoEntityData.init).map(${typeName}.init)
+  }${findMethod}
+}`;
+
+    return [entityStruct, queryStruct];
+  });
 }
 
 // MARK: - Enums (AppEnum)
