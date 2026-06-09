@@ -15,7 +15,8 @@ const GENERATED_FILE = 'ExpoGeneratedIntents.swift';
 const withGeneratedIntentsSource: ConfigPlugin<{
   intents: IntentConfig[];
   entities: IntentEntityConfig[];
-}> = (config, { intents, entities }) => {
+  defaultLocale: string;
+}> = (config, { intents, entities, defaultLocale }) => {
   // 1. Write the Swift file to disk under <projectName>/Intents/.
   config = withDangerousMod(config, [
     'ios',
@@ -26,7 +27,7 @@ const withGeneratedIntentsSource: ConfigPlugin<{
       await fs.promises.mkdir(targetDir, { recursive: true });
       await fs.promises.writeFile(
         path.join(targetDir, GENERATED_FILE),
-        generateIntentsSwift(intents, entities, appName)
+        generateIntentsSwift(intents, entities, appName, defaultLocale)
       );
       return cfg;
     },

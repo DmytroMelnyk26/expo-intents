@@ -7,6 +7,8 @@ import ExpoIntentsModule from './ExpoIntentsModule';
 export type IntentHandlerContext = {
   /** The `name` of the intent that triggered this handler. */
   intentName: string;
+  /** The device's current language as a BCP-47 tag (e.g. `"uk-UA"`), for localising output. */
+  locale: string;
 };
 
 /**

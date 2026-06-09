@@ -1,4 +1,18 @@
+import {
+  LocalizedString,
+  resolveLocalized,
+  resolveLocalizedPhrases,
+} from '../localized';
 import { IntentConfig, IntentEntityConfig, IntentEnumChoice, IntentParameter } from '../types';
+
+// The config's source language, set per `generateIntentsSwift` call. Localised values are baked
+// into Swift as their base (source-language) string; translations live in the string catalogs.
+let genDefaultLocale = 'en';
+
+/** Resolves a possibly-localised value to the base string emitted into Swift. */
+function base(value: LocalizedString): string {
+  return resolveLocalized(value, genDefaultLocale).base;
+}
 
 /**
  * Generates the Swift source containing one `AppIntent` struct per declared intent, any `AppEnum`
@@ -12,8 +26,10 @@ import { IntentConfig, IntentEntityConfig, IntentEnumChoice, IntentParameter } f
 export function generateIntentsSwift(
   intents: IntentConfig[],
   entities: IntentEntityConfig[],
-  appName: string
+  appName: string,
+  defaultLocale = 'en'
 ): string {
+  genDefaultLocale = defaultLocale;
   validateEntityReferences(intents, entities);
   // `internal import` matches Expo's generated ExpoModulesProvider.swift, which is compiled into
   // the same app target. Mixing an explicit access level there with a bare `import` here trips
@@ -69,7 +85,7 @@ function structName(intent: IntentConfig): string {
 function generateIntentStruct(intent: IntentConfig): string {
   const parameters = intent.parameters ?? [];
   const description = intent.description
-    ? `  static var description = IntentDescription(${swiftString(intent.description)})\n`
+    ? `  static var description = IntentDescription(${swiftString(base(intent.description))})\n`
     : '';
 
   const parameterDecls = parameters.map((p) => generateParameterDecl(intent, p)).join('\n');
@@ -80,7 +96,7 @@ function generateIntentStruct(intent: IntentConfig): string {
 
   return `@available(iOS 16.4, *)
 struct ${structName(intent)}: AppIntent {
-  static var title: LocalizedStringResource = ${swiftString(intent.title)}
+  static var title: LocalizedStringResource = ${swiftString(base(intent.title))}
 ${description}${parameterDecls ? parameterDecls + '\n' : ''}
   func perform() async throws -> some IntentResult & ReturnsValue<String> {
     let params: [String: Any] = ${paramsLiteral}
@@ -93,7 +109,7 @@ ${description}${parameterDecls ? parameterDecls + '\n' : ''}
 }
 
 function generateParameterDecl(intent: IntentConfig, parameter: IntentParameter): string {
-  const title = parameter.title ?? parameter.name;
+  const title = base(parameter.title ?? parameter.name);
   const args = [`title: ${swiftString(title)}`];
   if (parameter.default !== undefined) {
     args.push(`default: ${swiftDefault(intent, parameter)}`);
@@ -227,7 +243,7 @@ struct ${typeName}: AppEntity {
   }
 
   static var typeDisplayRepresentation: TypeDisplayRepresentation = ${swiftString(
-    entity.title ?? entity.name
+    base(entity.title ?? entity.name)
   )}
   var displayRepresentation: DisplayRepresentation {
     if let subtitle {
@@ -266,7 +282,7 @@ struct ${queryName}: ${searchable ? 'EntityStringQuery' : 'EntityQuery'} {
 
 // MARK: - Enums (AppEnum)
 
-type NormalizedChoice = { caseName: string; value: string; title: string };
+type NormalizedChoice = { caseName: string; value: string; title: LocalizedString };
 
 function enumTypeName(intent: IntentConfig, parameter: IntentParameter): string {
   return `${pascal(intent.name)}${pascal(parameter.name)}AppEnum`;
@@ -305,14 +321,14 @@ function generateEnums(intents: IntentConfig[]): string[] {
       const choices = normalizeChoices(intent, parameter);
       const cases = choices.map((c) => `  case ${c.caseName} = ${swiftString(c.value)}`).join('\n');
       const displays = choices
-        .map((c) => `    .${c.caseName}: ${swiftString(c.title)}`)
+        .map((c) => `    .${c.caseName}: ${swiftString(base(c.title))}`)
         .join(',\n');
       blocks.push(`@available(iOS 16.4, *)
 enum ${typeName}: String, AppEnum {
 ${cases}
 
   static var typeDisplayRepresentation: TypeDisplayRepresentation = ${swiftString(
-    parameter.title ?? parameter.name
+    base(parameter.title ?? parameter.name)
   )}
   static var caseDisplayRepresentations: [${typeName}: DisplayRepresentation] = [
 ${displays}
@@ -327,15 +343,19 @@ ${displays}
 
 function generateShortcutsProvider(intents: IntentConfig[], appName: string): string {
   const entries = intents
-    .filter((intent) => (intent.phrases ?? []).length > 0)
-    .map((intent) => {
-      const phrases = (intent.phrases ?? [])
+    .map((intent) => ({
+      intent,
+      phrases: intent.phrases ? resolveLocalizedPhrases(intent.phrases, genDefaultLocale).base : [],
+    }))
+    .filter(({ phrases }) => phrases.length > 0)
+    .map(({ intent, phrases }) => {
+      const phraseLiterals = phrases
         .map((phrase) => swiftPhrase(phrase, appName))
         .join(',\n        ');
       return `      AppShortcut(
         intent: ${structName(intent)}(),
         phrases: [
-        ${phrases}
+        ${phraseLiterals}
         ]
       )`;
     })

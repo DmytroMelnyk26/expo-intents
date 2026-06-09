@@ -27,12 +27,16 @@
       [
         "../app.plugin.js",
         {
+          "defaultLocale": "en",
           "intents": [
             {
               "name": "getGreeting",
-              "title": "Get Greeting",
+              "title": { "en": "Get Greeting", "uk": "Отримати привітання" },
               "description": "Returns a greeting for the saved user.",
-              "phrases": ["Get greeting from ${applicationName}"]
+              "phrases": {
+                "en": ["Get greeting from ${applicationName}"],
+                "uk": ["Привітання від ${applicationName}"]
+              }
             },
             {
               "name": "echo",
